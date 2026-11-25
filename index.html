@@ -47,6 +47,25 @@ svg{width:100%;height:auto;display:block}
 svg text{fill:var(--muted);font-size:10px}
 .ex-line{padding:3px 0;font-size:15px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.big-num{font-size:40px;font-weight:700;margin-top:4px}.big-num span{font-size:20px;color:var(--muted);font-weight:400}
+.bar{height:10px;background:var(--bg);border-radius:99px;overflow:hidden;margin-top:6px}.bar div{height:100%;background:var(--acc2);border-radius:99px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal i{aspect-ratio:1;border-radius:3px;background:#232a33;font-style:normal}
+.cal i.e{background:transparent}.cal i.f{opacity:.35}
+.cal i.l1{background:#166534}.cal i.l2{background:#16a34a}.cal i.l3{background:#4ade80}
+.cal i.t{outline:2px solid var(--text);outline-offset:-2px}
+.cal.big{gap:6px;margin-top:8px}.cal.big i{border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--muted)}
+.cal.big i.l1,.cal.big i.l2,.cal.big i.l3{color:#04130a;font-weight:600}
+.cal.big b{font-size:11px;color:var(--muted);text-align:center;font-weight:400}
+.minis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.minis label{white-space:nowrap}
+.legend{display:flex;gap:4px;align-items:center;justify-content:flex-end;margin-top:10px;font-size:11px;color:var(--muted)}
+.legend i{width:12px;height:12px;border-radius:3px;display:inline-block}.legend i.l1{background:#166534}.legend i.l2{background:#16a34a}.legend i.l3{background:#4ade80}
+.weeks{display:flex;gap:6px;height:90px;align-items:flex-end;margin:6px 0 18px}
+.weeks div{flex:1;height:100%;position:relative;background:var(--bg);border-radius:6px}
+.weeks span{position:absolute;bottom:0;left:0;right:0;background:#3b4552;border-radius:6px}.weeks span.ok{background:var(--acc2)}
+.weeks em{position:absolute;left:-2px;right:-2px;height:2px;background:var(--text);opacity:.6}
+.weeks small{position:absolute;bottom:-17px;left:0;right:0;text-align:center;font-size:10px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -54,6 +73,7 @@ svg text{fill:var(--muted);font-size:10px}
 <main id="app"></main>
 <nav>
   <button data-tab="train"><span>🏋️</span>Training</button>
+  <button data-tab="stats"><span>🔥</span>Statistik</button>
   <button data-tab="history"><span>📅</span>Verlauf</button>
   <button data-tab="progress"><span>📈</span>Fortschritt</button>
   <button data-tab="more"><span>⚙️</span>Mehr</button>
@@ -70,18 +90,26 @@ const num = v => { const n = parseFloat(String(v).replace(',', '.')); return isN
 const fmt = n => String(Math.round(n * 100) / 100).replace('.', ',');
 const pd = d => new Date(d + 'T12:00:00');
 const dstr = d => pd(d).toLocaleDateString('de-DE', {weekday:'short', day:'2-digit', month:'2-digit', year:'2-digit'});
-const today = () => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 10); };
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 const DEFAULTS = [['Bankdrücken','reps'],['Kniebeuge','reps'],['Kreuzheben','reps'],['Schulterdrücken','reps'],
   ['Klimmzüge','reps'],['Dips','reps'],['Rudern','reps'],['Muscle-up Negativ','sec']];
 
+const BW_NAMES = /klimmz|dips|muscle|liegest|push-?up|pull-?up|chin/i;  // typische Körpergewichtsübungen
 let db = load();
 let tab = 'train';
-let progEx = null, metric = null, persisted = false;
+let progEx = null, metric = null, persisted = false, calY = null, calM = null, showAll = false;
 
+function normalize(d) { // ergänzt neue Felder, damit alte Backups/Daten weiter funktionieren
+  d.settings = Object.assign({ weekGoal: 3 }, d.settings);
+  d.bodyweight = Array.isArray(d.bodyweight) ? d.bodyweight : [];
+  d.exercises.forEach(e => { if (e.bw === undefined) e.bw = BW_NAMES.test(e.name); });
+  if (d.active === undefined) d.active = null;
+  return d;
+}
 function load() {
-  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.sessions)) return d; } catch (e) {}
-  return { exercises: DEFAULTS.map(([name, unit]) => ({ id: uid(), name, unit })), sessions: [], active: null };
+  try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.sessions)) return normalize(d); } catch (e) {}
+  return normalize({ exercises: DEFAULTS.map(([name, unit]) => ({ id: uid(), name, unit })), sessions: [], active: null });
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); }
@@ -111,8 +139,8 @@ function bestFor(exId) { // bisherige Bestwerte aus gespeicherten Trainings
 /* ---------- Ansichten ---------- */
 function render() {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  const views = { train: viewTrain, history: viewHistory, progress: viewProgress, more: viewMore };
-  const titles = { train: db.active ? 'Training läuft' : 'Training', history: 'Verlauf', progress: 'Fortschritt', more: 'Mehr' };
+  const views = { train: viewTrain, stats: viewStats, history: viewHistory, progress: viewProgress, more: viewMore };
+  const titles = { train: db.active ? 'Training läuft' : 'Training', stats: 'Statistik', history: 'Verlauf', progress: 'Fortschritt', more: 'Mehr' };
   $('#title').textContent = titles[tab];
   $('#app').innerHTML = views[tab]();
 }
@@ -163,11 +191,12 @@ function viewHistory() {
 }
 
 const METRICS = {
-  max:   { label: 'Max. Gewicht',            f: ss => Math.max(...ss.map(s => s.w || 0)) },
-  e1rm:  { label: '1RM (geschätzt)',            f: ss => Math.max(...ss.map(s => (s.w || 0) * (1 + s.r / 30))) },
-  vol:   { label: 'Volumen',  f: ss => ss.reduce((a, s) => a + (s.w || 0) * s.r, 0) },
+  max:   { label: 'Max. Gewicht',       f: ss => Math.max(...ss.map(s => s.w || 0)) },
+  e1rm:  { label: '1RM (geschätzt)',    f: ss => Math.max(...ss.map(s => (s.w || 0) * (1 + s.r / 30))) },
+  vol:   { label: 'Volumen',            f: ss => ss.reduce((a, s) => a + (s.w || 0) * s.r, 0) },
+  load:  { label: 'Gesamtlast inkl. KG', f: (ss, d) => bwAt(d) + Math.max(...ss.map(s => s.w || 0)) },
   reps:  { label: 'Beste Wdh/Sek.',     f: ss => Math.max(...ss.map(s => s.r)) },
-  total: { label: 'Summe Wdh/Sek.',             f: ss => ss.reduce((a, s) => a + s.r, 0) },
+  total: { label: 'Summe Wdh/Sek.',     f: ss => ss.reduce((a, s) => a + s.r, 0) },
 };
 
 function viewProgress() {
@@ -178,35 +207,46 @@ function viewProgress() {
   const rows = [...db.sessions].sort((a, b) => a.date.localeCompare(b.date))
     .map(s => ({ date: s.date, sets: s.entries.filter(e => e.exId === progEx).flatMap(e => e.sets) })).filter(r => r.sets.length);
   const hasW = rows.some(r => r.sets.some(s => s.w));
-  if (!metric || (!hasW && ['max','e1rm','vol'].includes(metric))) metric = hasW ? 'max' : 'reps';
-  const opts = Object.entries(METRICS).filter(([k]) => hasW || !['max','e1rm','vol'].includes(k));
-  const pts = rows.map(r => ({ x: r.date, y: METRICS[metric].f(r.sets) }));
+  const canLoad = ex.bw && db.bodyweight.length;
+  const allowed = k => (['max','e1rm','vol'].includes(k) ? hasW : true) && (k !== 'load' || canLoad);
+  if (!metric || !allowed(metric)) metric = canLoad && hasW ? 'load' : hasW ? 'max' : 'reps';
+  const opts = Object.entries(METRICS).filter(([k]) => allowed(k));
+  const pts = rows.map(r => ({ x: r.date, y: METRICS[metric].f(r.sets, r.date) }));
   const ys = pts.map(p => p.y), first = ys[0], lastV = ys[ys.length - 1];
   const diff = first ? Math.round((lastV - first) / first * 100) : 0;
+  // Körpergewicht im gleichen Zeitraum wie die Übung -> beide Kurven haben dieselbe Zeitachse
+  const range = { t0: +pd(rows[0].date), t1: +pd(rows[rows.length - 1].date) };
+  const bwPts = db.bodyweight.filter(b => +pd(b.date) >= range.t0 && +pd(b.date) <= range.t1).map(b => ({ x: b.date, y: b.kg }));
   return `<div class="card">
     <div class="grid2">
       <div><label>Übung</label><select data-c="progEx">${used.map(e => `<option value="${e.id}" ${e.id === progEx ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
       <div><label>Messgröße</label><select data-c="metric">${opts.map(([k, m]) => `<option value="${k}" ${k === metric ? 'selected' : ''}>${m.label}</option>`).join('')}</select></div>
     </div>
     <div class="stats"><div><b>${fmt(first)}</b>Anfang</div><div><b>${fmt(lastV)}</b>Zuletzt</div><div><b>${fmt(Math.max(...ys))}</b>Bestwert</div></div>
-    ${chart(pts)}
+    ${chart(pts, rows.length > 1 ? range : null)}
     <p class="muted" style="margin-top:8px">${rows.length} Trainings · Veränderung seit Anfang: ${diff > 0 ? '+' : ''}${diff} %</p>
     ${metric === 'vol' ? '<p class="muted" style="margin-top:6px">Volumen = Summe aus Gewicht × Wdh über alle Sätze.</p>' : ''}
     ${metric === 'e1rm' ? '<p class="muted" style="margin-top:6px">1RM = geschätztes Maximalgewicht für 1 Wiederholung (Epley-Formel: Gewicht × (1 + Wdh/30)).</p>' : ''}
+    ${metric === 'load' ? '<p class="muted" style="margin-top:6px">Gesamtlast = dein Körpergewicht am Trainingstag (letzter Eintrag davor) + Zusatzgewicht. So siehst du echten Kraftzuwachs, auch wenn du schwerer oder leichter wirst.</p>' : ''}
+    ${ex.bw && !db.bodyweight.length ? '<p class="muted" style="margin-top:6px">Tipp: Trag unter „Statistik“ dein Körpergewicht ein, dann bekommst du hier die Messgröße „Gesamtlast inkl. KG“.</p>' : ''}
   </div>
-  <div class="card"><h2 style="margin-bottom:6px">Alle Einträge</h2>
-    ${rows.slice().reverse().map(r => `<div class="ex-line">${dstr(r.date)} <span class="muted">${r.sets.map(s => setTxt(s, ex)).join(' · ')}</span></div>`).join('')}
+  ${db.bodyweight.length ? `<div class="card"><h2>Körpergewicht im selben Zeitraum</h2>
+    ${bwPts.length && rows.length > 1 ? chart(bwPts, range, '#60a5fa', 1) : '<p class="muted" style="margin-top:6px">Keine Körpergewicht-Einträge in diesem Zeitraum.</p>'}</div>` : ''}
+  <div class="card"><h2 style="margin-bottom:6px">Einträge</h2>
+    ${rows.slice().reverse().slice(0, showAll ? undefined : 10).map(r => `<div class="ex-line">${dstr(r.date)} <span class="muted">${r.sets.map(s => setTxt(s, ex)).join(' · ')}</span></div>`).join('')}
+    ${rows.length > 10 ? `<button class="block" data-a="toggleAll">${showAll ? 'Weniger anzeigen' : `Alle ${rows.length} anzeigen`}</button>` : ''}
   </div>`;
 }
 
-function chart(pts) {
-  if (pts.length < 2) return `<p class="muted">Ab 2 Trainings erscheint hier ein Diagramm.</p>`;
+// pts: [{x: 'YYYY-MM-DD', y: Zahl}], range: optionale feste Zeitachse {t0, t1}
+function chart(pts, range, color = '#4ade80', minPts = 2) {
+  if (pts.length < minPts) return `<p class="muted">Ab 2 Einträgen erscheint hier ein Diagramm.</p>`;
   const W = 320, H = 170, L = 36, R = 10, T = 10, B = 22;
   const ys = pts.map(p => p.y);
   let lo = Math.min(...ys), hi = Math.max(...ys);
   if (lo === hi) { lo -= 1; hi += 1; }
   const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-  const t0 = +pd(pts[0].x), span = (+pd(pts[pts.length - 1].x) - t0) || 1;
+  const t0 = range ? range.t0 : +pd(pts[0].x), t1 = range ? range.t1 : +pd(pts[pts.length - 1].x), span = (t1 - t0) || 1;
   const X = p => L + (+pd(p.x) - t0) / span * (W - L - R);
   const Y = v => T + (hi - v) / (hi - lo) * (H - T - B);
   let g = '';
@@ -215,12 +255,116 @@ function chart(pts) {
     g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#2a313a"/><text x="${L - 4}" y="${y + 3}" text-anchor="end">${fmt(Math.round(v * 10) / 10)}</text>`;
   }
   const line = pts.map(p => `${X(p).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ');
-  const short = d => pd(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+  const short = t => new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
   return `<svg viewBox="0 0 ${W} ${H}">${g}
-    <polyline points="${line}" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linejoin="round"/>
-    ${pts.map(p => `<circle cx="${X(p)}" cy="${Y(p.y)}" r="3.5" fill="#4ade80"/>`).join('')}
-    <text x="${L}" y="${H - 6}">${short(pts[0].x)}</text>
-    <text x="${W - R}" y="${H - 6}" text-anchor="end">${short(pts[pts.length - 1].x)}</text></svg>`;
+    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>
+    ${pts.map(p => `<circle cx="${X(p)}" cy="${Y(p.y)}" r="3.5" fill="${color}"/>`).join('')}
+    <text x="${L}" y="${H - 6}">${short(t0)}</text>
+    <text x="${W - R}" y="${H - 6}" text-anchor="end">${short(t1)}</text></svg>`;
+}
+
+/* ---------- Statistik: Kalender, Wochenziel, Körpergewicht ---------- */
+const MONTHS = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+const pad2 = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const addDays = (s, n) => { const d = pd(s); d.setDate(d.getDate() + n); return iso(d); };
+const weekStart = s => addDays(s, -((pd(s).getDay() + 6) % 7));   // Montag der Woche
+const bwAt = d => { // letztes Körpergewicht am oder vor dem Datum (sonst das erste überhaupt)
+  const list = [...db.bodyweight].sort((a, b) => a.date.localeCompare(b.date));
+  let v = list.length ? list[0].kg : 0;
+  for (const b of list) if (b.date <= d) v = b.kg;
+  return v;
+};
+function dayMap() { // Datum -> Anzahl Sätze an diesem Tag
+  const m = {};
+  db.sessions.forEach(s => m[s.date] = (m[s.date] || 0) + s.entries.reduce((a, e) => a + e.sets.length, 0));
+  return m;
+}
+function monthGrid(y, mo, days, big) {
+  const off = (new Date(y, mo, 1).getDay() + 6) % 7, n = new Date(y, mo + 1, 0).getDate(), t = today();
+  let c = big ? ['Mo','Di','Mi','Do','Fr','Sa','So'].map(d => `<b>${d}</b>`).join('') : '';
+  for (let i = 0; i < off; i++) c += '<i class="e"></i>';
+  for (let d = 1; d <= n; d++) {
+    const k = `${y}-${pad2(mo + 1)}-${pad2(d)}`, sets = days[k] || 0;
+    const lvl = !sets ? 0 : sets >= 20 ? 3 : sets >= 12 ? 2 : 1;
+    c += `<i class="l${lvl}${k === t ? ' t' : ''}${k > t ? ' f' : ''}">${big ? d : ''}</i>`;
+  }
+  return `<div class="cal${big ? ' big' : ''}">${c}</div>`;
+}
+
+function viewStats() {
+  const days = dayMap(), dates = Object.keys(days).sort(), t = today(), goal = db.settings.weekGoal;
+  const goalSel = `<select data-c="goal" style="width:auto;padding:6px 10px">${[1,2,3,4,5,6,7].map(n => `<option ${n === goal ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+  let h = '';
+  if (!dates.length) {
+    h += `<div class="card"><h2>Wochenziel</h2><p class="muted" style="margin:6px 0">Wie oft willst du pro Woche trainieren? ${goalSel} ×</p>
+      <p class="muted">Sobald du dein erstes Training gespeichert hast, siehst du hier Kalender und Statistiken.</p></div>`;
+  } else {
+    // --- Wochen-Statistik ---
+    const wc = {}; dates.forEach(d => { const w = weekStart(d); wc[w] = (wc[w] || 0) + 1; });
+    const cur = weekStart(t), weeks = [];
+    for (let w = weekStart(dates[0]); w <= cur; w = addDays(w, 7)) weeks.push(w);
+    const done = weeks.filter(w => w < cur);                       // abgeschlossene Wochen
+    const thisW = wc[cur] || 0;
+    const avg = done.length ? done.reduce((a, w) => a + (wc[w] || 0), 0) / done.length : thisW;
+    const hit = done.filter(w => (wc[w] || 0) >= goal).length;
+    let streak = 0; for (let i = done.length - 1; i >= 0 && (wc[done[i]] || 0) >= goal; i--) streak++;
+    if (thisW >= goal) streak++;
+    const left = goal - thisW, daysLeft = 7 - (pd(t).getDay() + 6) % 7;
+    const msg = left <= 0 ? '🎉 Wochenziel geschafft!' : left > daysLeft ? `Noch ${left} – diese Woche wird knapp, nächste Woche wieder angreifen 💪`
+      : `Noch ${left}× in ${daysLeft} Tag${daysLeft > 1 ? 'en' : ''} – du schaffst das!`;
+    const last8 = weeks.slice(-8);
+    const maxC = Math.max(goal, ...last8.map(w => wc[w] || 0));
+    h += `<div class="card">
+      <div class="head"><h2>Diese Woche</h2><span class="muted">Ziel: ${goalSel} × pro Woche</span></div>
+      <div class="big-num">${thisW}<span> / ${goal}</span></div>
+      <div class="bar"><div style="width:${Math.min(100, thisW / goal * 100)}%"></div></div>
+      <p class="muted" style="margin-top:6px">${msg}</p>
+      <div class="stats">
+        <div><b>${fmt(Math.round(avg * 10) / 10)}</b>Ø pro Woche</div>
+        <div><b>${streak} 🔥</b>Wochen-Serie</div>
+        <div><b>${done.length ? Math.round(hit / done.length * 100) + ' %' : '–'}</b>Ziel erreicht</div>
+      </div>
+      <label>Letzte ${last8.length} Wochen</label>
+      <div class="weeks">${last8.map(w => { const n = wc[w] || 0; return `<div><span class="${n >= goal ? 'ok' : ''}" style="height:${n / maxC * 100}%"></span><em style="bottom:${goal / maxC * 100}%"></em><small>${pd(w).getDate()}.${pd(w).getMonth() + 1}.</small></div>`; }).join('')}</div>
+      <p class="muted" style="margin-top:6px">Gezählt werden Trainingstage (Mo–So). Grün = Ziel erreicht, Strich = Ziel.</p>
+    </div>`;
+
+    // --- Großer Monatskalender ---
+    if (calY === null) { calY = pd(t).getFullYear(); calM = pd(t).getMonth(); }
+    const inMonth = dates.filter(d => d.startsWith(`${calY}-${pad2(calM + 1)}`)).length;
+    h += `<div class="card">
+      <div class="head"><button class="ghost" data-a="calNav" data-d="-1">‹</button>
+        <h2>${MONTHS[calM]} ${calY} <span class="muted">· ${inMonth}× trainiert</span></h2>
+        <button class="ghost" data-a="calNav" data-d="1">›</button></div>
+      ${monthGrid(calY, calM, days, true)}
+      <div class="legend"><span>weniger Sätze</span><i class="l1"></i><i class="l2"></i><i class="l3"></i><span>mehr</span></div></div>`;
+
+    // --- All-time: ein Mini-Kalender pro Monat seit dem ersten Training ---
+    const f = pd(dates[0]), months = [];
+    for (let y = f.getFullYear(), m = f.getMonth(); y < pd(t).getFullYear() || (y === pd(t).getFullYear() && m <= pd(t).getMonth()); m === 11 ? (y++, m = 0) : m++) months.push([y, m]);
+    h += `<div class="card"><h2>Seit dem ersten Training</h2>
+      <p class="muted" style="margin-bottom:10px">${dates.length} Trainingstage seit ${dstr(dates[0])}</p>
+      <div class="minis">${months.reverse().map(([y, m]) => {
+        const n = dates.filter(d => d.startsWith(`${y}-${pad2(m + 1)}`)).length;
+        return `<div data-a="showMonth" data-y="${y}" data-m="${m}"><label>${MONTHS[m]} ${String(y).slice(2)} · ${n}×</label>${monthGrid(y, m, days, false)}</div>`;
+      }).join('')}</div></div>`;
+  }
+
+  // --- Körpergewicht (optional) ---
+  const bw = [...db.bodyweight].sort((a, b) => a.date.localeCompare(b.date));
+  const lastBw = bw[bw.length - 1];
+  h += `<div class="card"><h2>Körpergewicht <span class="muted">(optional)</span></h2>
+    <div class="add-set" style="grid-template-columns:1fr auto;margin-top:8px">
+      <div><label>Heute (kg)</label><input id="bwIn" inputmode="decimal" placeholder="${lastBw ? fmt(lastBw.kg) : 'z. B. 75,5'}"></div>
+      <button class="primary" data-a="addBw">Eintragen</button></div>
+    ${bw.length ? `<div class="stats"><div><b>${fmt(bw[0].kg)}</b>Anfang</div><div><b>${fmt(lastBw.kg)}</b>Aktuell</div>
+      <div><b>${lastBw.kg - bw[0].kg > 0 ? '+' : ''}${fmt(lastBw.kg - bw[0].kg)}</b>Veränderung</div></div>
+      ${chart(bw.map(b => ({ x: b.date, y: b.kg })), null, '#60a5fa')}
+      <div style="margin-top:8px">${bw.slice(-5).reverse().map(b => `<div class="set"><span>${dstr(b.date)} · ${fmt(b.kg)} kg</span><button class="ghost" data-a="delBw" data-id="${b.id}">✕</button></div>`).join('')}</div>`
+      : '<p class="muted" style="margin-top:8px">Trag ab und zu dein Gewicht ein – daraus wird eine Kurve, auch unter „Fortschritt“.</p>'}
+  </div>`;
+  return h;
 }
 
 function viewMore() {
@@ -234,8 +378,9 @@ function viewMore() {
   <div class="card"><h2 style="margin-bottom:6px">Übungen</h2>
     ${db.exercises.slice().sort((a, b) => a.name.localeCompare(b.name, 'de')).map(e => `<div class="set">
       <span>${esc(e.name)} <span class="muted">${isSec(e) ? '· Sek.' : ''} ${uses(e.id) ? '· ' + uses(e.id) + '×' : ''}</span></span>
-      <span><button class="ghost" data-a="renameEx" data-id="${e.id}">✏️</button>${uses(e.id) ? '' : `<button class="ghost" data-a="delEx" data-id="${e.id}">🗑️</button>`}</span></div>`).join('')}
-    <button class="block" data-a="pickEx" data-only="1">+ Neue Übung</button></div>`;
+      <span><button class="ghost" data-a="toggleBw" data-id="${e.id}" title="Körpergewichtsübung">${e.bw ? '🧍✓' : '🧍–'}</button><button class="ghost" data-a="renameEx" data-id="${e.id}">✏️</button>${uses(e.id) ? '' : `<button class="ghost" data-a="delEx" data-id="${e.id}">🗑️</button>`}</span></div>`).join('')}
+    <button class="block" data-a="pickEx" data-only="1">+ Neue Übung</button>
+    <p class="muted" style="margin-top:8px">🧍✓ = Körpergewichtsübung: Dafür gibt's unter „Fortschritt“ die Gesamtlast inkl. Körpergewicht.</p></div>`;
 }
 
 /* ---------- Übungsauswahl (Bottom Sheet) ---------- */
@@ -251,6 +396,7 @@ function sheetPicker(onlyCreate) {
     <h2 style="margin-bottom:8px">Neue Übung</h2>
     <input id="newName" placeholder="Name, z. B. Bizepscurls">
     <select id="newUnit" style="margin-top:8px"><option value="reps">Wiederholungen</option><option value="sec">Sekunden (Halten, Negativ …)</option></select>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px"><input type="checkbox" id="newBw" style="width:auto"> Körpergewichtsübung (Klimmzüge, Dips …)</label>
     <button class="primary block" data-a="newEx" data-only="${onlyCreate ? 1 : ''}">Anlegen</button>
     <button class="block" data-a="closeSheet">Abbrechen</button>`);
 }
@@ -265,7 +411,7 @@ const act = {
     const name = $('#newName').value.trim();
     if (!name) return $('#newName').focus();
     if (db.exercises.some(e => e.name.toLowerCase() === name.toLowerCase())) return alert('Diese Übung gibt es schon.');
-    const ex = { id: uid(), name, unit: $('#newUnit').value };
+    const ex = { id: uid(), name, unit: $('#newUnit').value, bw: $('#newBw').checked };
     db.exercises.push(ex);
     if (!d.only && db.active) db.active.entries.push({ exId: ex.id, sets: [] });
     save(); closeSheet(); render();
@@ -306,6 +452,18 @@ const act = {
     download(`gymlog-${today()}.csv`, rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n'), 'text/csv');
   },
   import() { $('#importFile').click(); },
+  toggleAll() { showAll = !showAll; render(); },
+  toggleBw(d) { const ex = exById(d.id); ex.bw = !ex.bw; save(); render(); },
+  calNav(d) { calM += +d.d; if (calM < 0) { calM = 11; calY--; } if (calM > 11) { calM = 0; calY++; } render(); },
+  showMonth(d) { calY = +d.y; calM = +d.m; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
+  addBw() {
+    const kg = num($('#bwIn').value);
+    if (kg < 20 || kg > 400) return $('#bwIn').focus();
+    const t = today(), ex = db.bodyweight.find(b => b.date === t);   // pro Tag nur ein Eintrag
+    if (ex) ex.kg = kg; else db.bodyweight.push({ id: uid(), date: t, kg });
+    save(); render();
+  },
+  delBw(d) { if (confirm('Eintrag löschen?')) { db.bodyweight = db.bodyweight.filter(b => b.id !== d.id); save(); render(); } },
 };
 
 function download(name, text, type) {
@@ -325,8 +483,9 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   const c = e.target.dataset.c;
-  if (c === 'progEx') { progEx = e.target.value; metric = null; render(); }
+  if (c === 'progEx') { progEx = e.target.value; metric = null; showAll = false; render(); }
   if (c === 'metric') { metric = e.target.value; render(); }
+  if (c === 'goal') { db.settings.weekGoal = +e.target.value; save(); render(); }
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'note' && db.active) { db.active.note = e.target.value; save(); }
@@ -337,13 +496,14 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('keydown', e => {   // Enter im Wdh-Feld = Satz hinzufügen
   if (e.key === 'Enter' && /^r\d+$/.test(e.target.id)) act.addSet({ i: e.target.id.slice(1) });
+  if (e.key === 'Enter' && e.target.id === 'bwIn') act.addBw();
 });
 $('#importFile').addEventListener('change', async e => {
   const f = e.target.files[0]; if (!f) return;
   try {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.sessions) || !Array.isArray(d.exercises)) throw new Error('Keine GymLog-Datei');
-    if (confirm(`Backup mit ${d.sessions.length} Trainings laden? Aktuelle Daten werden ersetzt.`)) { db = d; save(); render(); }
+    if (confirm(`Backup mit ${d.sessions.length} Trainings laden? Aktuelle Daten werden ersetzt.`)) { db = normalize(d); save(); render(); }
   } catch (err) { alert('Import fehlgeschlagen: ' + err.message); }
   e.target.value = '';
 });

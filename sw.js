@@ -1,7 +1,7 @@
 // Service Worker: macht die App offline-fähig.
 // Strategie "stale-while-revalidate": sofort aus dem Cache laden (schnell, auch ohne Netz im Gym),
 // im Hintergrund die neueste Version holen und für das nächste Öffnen speichern.
-const CACHE = 'gymlog-v1';
+const CACHE = 'gymlog-v2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
